@@ -36,6 +36,7 @@
 #include "server/syncobj_acquire_barrier.h"
 #include "server/syncobj_superseded_release.h"
 #include "server/syncobj_unmap_release.h"
+#include "server/xdg_decoration.h"
 #include "view/view.h"
 #include "wlr.h"
 #include "workspace/scratchpad.h"
@@ -875,9 +876,12 @@ namespace umbriel {
     m_setXdgToplevelTag.notify = onSetXdgToplevelTag;
     wl_signal_add(&m_xdgToplevelTagManager->events.set_tag, &m_setXdgToplevelTag);
 
-    m_xdgDecorationManager = wlr_xdg_decoration_manager_v1_create(m_display);
+    m_xdgDecorationManager = xdgDecorationManagerCreate(m_display);
+    if (m_xdgDecorationManager == nullptr) {
+      throw std::runtime_error("failed to create XDG decoration manager");
+    }
     m_newXdgDecoration.notify = onNewXdgDecoration;
-    wl_signal_add(&m_xdgDecorationManager->events.new_toplevel_decoration, &m_newXdgDecoration);
+    wl_signal_add(&m_xdgDecorationManager->events.newToplevelDecoration, &m_newXdgDecoration);
 
     m_serverDecorationManager = wlr_server_decoration_manager_create(m_display);
     m_newLegacyDecoration.notify = onNewLegacyDecoration;
@@ -1185,6 +1189,10 @@ namespace umbriel {
       }
     }
     wl_display_destroy_clients(m_display);
+    // Every decoration resource died with its client above, so the manager's
+    // decoration list is empty and its global can go before the display does.
+    xdgDecorationManagerDestroy(m_xdgDecorationManager);
+    m_xdgDecorationManager = nullptr;
     m_drmLeaseManager.reset();
     m_colorManager.reset();
     m_syncobjAcquireBarrier.reset();

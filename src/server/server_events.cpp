@@ -27,6 +27,7 @@
 #include "server/drm_lease.h"
 #include "server/ipc.h"
 #include "server/server.h"
+#include "server/xdg_decoration.h"
 #include "view/popup.h"
 #include "view/view.h"
 #include "wlr.h"
@@ -145,19 +146,19 @@ namespace umbriel {
           || state.adaptive_sync_enabled == adaptiveSyncEnabled;
     }
 
-    wlr_xdg_toplevel_decoration_v1_mode resolvedDecorationMode(wlr_xdg_toplevel_decoration_v1* decoration) {
+    XdgDecorationMode resolvedDecorationMode(XdgToplevelDecoration* decoration) {
       // Only clients whose connection prefers SSD can see the manager. Honor
       // an explicit request, otherwise keep the server-side preference.
-      wlr_xdg_toplevel_decoration_v1_mode mode = decoration->requested_mode;
-      if (mode == WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_NONE) {
-        mode = WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+      XdgDecorationMode mode = decoration->requestedMode;
+      if (mode == XdgDecorationModeNone) {
+        mode = XdgDecorationModeServerSide;
       }
       return mode;
     }
 
     struct XdgDecorationWatch {
-      wlr_xdg_toplevel_decoration_v1* decoration = nullptr;
-      wlr_xdg_toplevel_decoration_v1_mode pendingMode = WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+      XdgToplevelDecoration* decoration = nullptr;
+      XdgDecorationMode pendingMode = XdgDecorationModeClientSide;
       wl_listener requestMode{};
       wl_listener surfaceCommit{};
       wl_listener destroy{};
@@ -179,7 +180,7 @@ namespace umbriel {
           || !watch->decoration->toplevel->base->initial_commit) {
         return;
       }
-      wlr_xdg_toplevel_decoration_v1_set_mode(watch->decoration, watch->pendingMode);
+      xdgToplevelDecorationSetMode(watch->decoration, watch->pendingMode);
       clearDecorationCommit(watch);
     }
 
@@ -193,12 +194,12 @@ namespace umbriel {
       }
       watch->pendingMode = resolvedDecorationMode(watch->decoration);
       if (View* view = View::fromSurface(surface->surface)) {
-        view->setXdgDecorationPreference(watch->pendingMode == WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+        view->setXdgDecorationPreference(watch->pendingMode == XdgDecorationModeServerSide);
       }
       // set_mode schedules a configure; that asserts unless the xdg_surface is ready.
       if (surface->initialized) {
         clearDecorationCommit(watch);
-        wlr_xdg_toplevel_decoration_v1_set_mode(watch->decoration, watch->pendingMode);
+        xdgToplevelDecorationSetMode(watch->decoration, watch->pendingMode);
         return;
       }
       if (watch->surfaceCommit.notify != nullptr) {
@@ -1375,11 +1376,11 @@ namespace umbriel {
   void Server::onNewXdgDecoration(wl_listener* listener, void* data) {
     Server* self;
     self = wl_container_of(listener, self, m_newXdgDecoration);
-    auto* decoration = static_cast<wlr_xdg_toplevel_decoration_v1*>(data);
+    auto* decoration = static_cast<XdgToplevelDecoration*>(data);
     auto* watch = new XdgDecorationWatch{.decoration = decoration};
     decoration->data = watch;
     watch->requestMode.notify = onDecorationRequestMode;
-    wl_signal_add(&decoration->events.request_mode, &watch->requestMode);
+    wl_signal_add(&decoration->events.requestMode, &watch->requestMode);
     watch->destroy.notify = onDecorationDestroy;
     wl_signal_add(&decoration->events.destroy, &watch->destroy);
     applyXdgDecorationMode(watch);

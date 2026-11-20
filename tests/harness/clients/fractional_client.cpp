@@ -15,6 +15,8 @@
 // HOLD_SIZE keeps the default dimensions while acknowledging configures, exposing compositor-only resize scaling.
 // TITLE_AFTER_CONFIGURE sets the opening title after the first configure and before committing the first buffer.
 // RESIZE_BEFORE_MAP uses the default dimensions for that first buffer, then follows later configures normally.
+// XDG_DECORATION_VERSION binds the decoration manager at that version (default 1); XDG_DECORATION_LATE creates the
+// decoration object after the first commit, which only protocol version 2 permits.
 
 #include "fractional-scale-v1-client-protocol.h"
 #include "parse_ints.h"
@@ -23,6 +25,7 @@
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -261,8 +264,31 @@ namespace {
   }
   constexpr org_kde_kwin_server_decoration_listener kLegacyListener{.mode = legacyMode};
 
+  void createXdgDecoration(State& state, const char* mode) {
+    if (state.decorationManager == nullptr || state.decoration != nullptr) {
+      return;
+    }
+    state.decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(state.decorationManager, state.toplevel);
+    zxdg_toplevel_decoration_v1_add_listener(state.decoration, &kDecorationListener, &state);
+    if (mode != nullptr && strcmp(mode, "unset") != 0) {
+      zxdg_toplevel_decoration_v1_set_mode(
+          state.decoration,
+          strcmp(mode, "server") == 0 ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
+                                      : ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+      );
+    }
+  }
+
   void handleDecorationCommand(State& state, std::string_view command) {
-    if (command == "xdg destroy" && state.decoration != nullptr) {
+    if (command == "xdg create") {
+      createXdgDecoration(state, nullptr);
+    } else if (command == "xdg dup" && state.decorationManager != nullptr && state.decoration != nullptr) {
+      // A second decoration object for the same toplevel is a protocol error.
+      zxdg_decoration_manager_v1_get_toplevel_decoration(state.decorationManager, state.toplevel);
+    } else if (command == "xdg bad" && state.decoration != nullptr) {
+      // Only client_side (1) and server_side (2) are valid modes.
+      zxdg_toplevel_decoration_v1_set_mode(state.decoration, 3);
+    } else if (command == "xdg destroy" && state.decoration != nullptr) {
       zxdg_toplevel_decoration_v1_destroy(state.decoration);
       state.decoration = nullptr;
     } else if (command == "legacy destroy" && state.legacyDecoration != nullptr) {
@@ -319,8 +345,12 @@ namespace {
     } else if (
         strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0 && std::getenv("XDG_DECORATION") != nullptr
     ) {
+      uint32_t version = 1;
+      if (const char* requested = std::getenv("XDG_DECORATION_VERSION"); requested != nullptr) {
+        version = std::min<uint32_t>(std::max(atoi(requested), 1), 2);
+      }
       state.decorationManager = static_cast<zxdg_decoration_manager_v1*>(
-          wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, 1)
+          wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, version)
       );
     } else if (strcmp(interface, wl_seat_interface.name) == 0 && std::getenv("LOG_POINTER") != nullptr) {
       auto* seat = static_cast<wl_seat*>(wl_registry_bind(registry, name, &wl_seat_interface, 1));
@@ -430,22 +460,27 @@ int main(int argc, char** argv) {
   state.toplevel = xdg_surface_get_toplevel(state.xdgSurface);
   xdg_toplevel_add_listener(state.toplevel, &kToplevelListener, &state);
   xdg_toplevel_set_title(state.toplevel, title);
-  if (const char* mode = std::getenv("XDG_DECORATION"); mode != nullptr) {
+  const char* decorationMode = std::getenv("XDG_DECORATION");
+  const bool lateDecoration = std::getenv("XDG_DECORATION_LATE") != nullptr;
+  if (decorationMode != nullptr && !lateDecoration) {
     if (state.decorationManager == nullptr) {
       std::println(stderr, "fractional-client: decoration manager unavailable");
       return 1;
     }
-    state.decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(state.decorationManager, state.toplevel);
-    zxdg_toplevel_decoration_v1_add_listener(state.decoration, &kDecorationListener, &state);
-    if (strcmp(mode, "unset") != 0) {
-      zxdg_toplevel_decoration_v1_set_mode(
-          state.decoration,
-          strcmp(mode, "server") == 0 ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
-                                      : ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
-      );
-    }
+    createXdgDecoration(state, decorationMode);
   }
   wl_surface_commit(state.surface);
+  if (lateDecoration) {
+    if (state.decorationManager == nullptr) {
+      std::println(stderr, "fractional-client: decoration manager unavailable");
+      return 1;
+    }
+    // Version 2 permits get_toplevel_decoration after the surface has a buffer;
+    // version 1 clients get unconfigured_buffer here instead.
+    wl_display_roundtrip(state.display);
+    createXdgDecoration(state, decorationMode);
+    wl_display_roundtrip(state.display);
+  }
 
   const bool controlled = std::getenv("DECORATION_CONTROL") != nullptr;
   while (state.running) {

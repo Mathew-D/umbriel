@@ -78,7 +78,6 @@ struct wlr_tablet_v2_tablet_pad;
 struct wlr_tearing_control_manager_v1;
 struct wlr_xdg_activation_v1;
 struct wlr_xdg_activation_token_v1;
-struct wlr_xdg_decoration_manager_v1;
 struct wlr_xdg_shell;
 struct wlr_xdg_toplevel_tag_manager_v1;
 struct wlr_server_decoration_manager;
@@ -94,6 +93,7 @@ struct wlr_virtual_pointer_manager_v1;
 struct wlr_virtual_pointer_v1;
 
 namespace umbriel {
+  struct XdgDecorationManager;
   enum class ContentType;
   struct ConfigEffects;
 
@@ -777,7 +777,7 @@ namespace umbriel {
     wlr_scene_output_layout* m_sceneLayout = nullptr;
     wlr_xdg_shell* m_xdgShell = nullptr;
     wlr_xdg_toplevel_tag_manager_v1* m_xdgToplevelTagManager = nullptr;
-    wlr_xdg_decoration_manager_v1* m_xdgDecorationManager = nullptr;
+    XdgDecorationManager* m_xdgDecorationManager = nullptr;
     wlr_server_decoration_manager* m_serverDecorationManager = nullptr;
     wlr_layer_shell_v1* m_layerShell = nullptr;
     wlr_foreign_toplevel_manager_v1* m_foreignToplevelManager = nullptr;
