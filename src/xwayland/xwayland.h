@@ -25,6 +25,7 @@ struct xcb_connection_t;
 namespace umbriel {
 
   class Server;
+  class SvgCursorTheme;
   class XwaylandWindow;
   class XwaylandShapes;
   class XwaylandPrimary;
@@ -49,8 +50,9 @@ namespace umbriel {
     [[nodiscard]] bool setInputSocket(int fd);
     bool authenticateInputPeer(pid_t peer) const;
     // The cursor X clients see over their windows until they set their own. The buffer belongs to `manager`, so this
-    // must run again before a replaced manager is destroyed. Also republishes the cursor theme in XSETTINGS.
-    void applyCursor(wlr_xcursor_manager* manager);
+    // must run again before a replaced manager is destroyed; `svgTheme` (when set) supplies the default cursor
+    // instead. Also republishes the cursor theme in XSETTINGS.
+    void applyCursor(wlr_xcursor_manager* manager, SvgCursorTheme* svgTheme);
     // Disconnect the owning X11 client and destroy its resources, including windows retained after client exit.
     [[nodiscard]] bool killClient(const wlr_xwayland_surface* xsurface);
     // Called by a window whose X11 surface was destroyed; deletes it.

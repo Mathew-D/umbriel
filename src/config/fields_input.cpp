@@ -338,6 +338,10 @@ namespace umbriel {
       static const Fields<In::Cursor> cursor{
           text("theme", &In::Cursor::theme),
           integer("size", 1, 512, &In::Cursor::size),
+          choice(
+              "backend", &In::Cursor::backend,
+              {{.name = "xcursor", .value = CursorBackend::Xcursor}, {.name = "svg", .value = CursorBackend::Svg}}
+          ),
           boolean("hardware_cursor", &In::Cursor::hardwareCursor),
           boolean("follows_focus", &In::Cursor::followsFocus),
           boolean("hide_when_typing", &In::Cursor::hideWhenTyping),

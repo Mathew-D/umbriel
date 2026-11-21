@@ -177,6 +177,14 @@ numlock_toggle = true
 # enabled = true
 # map_to_output = "eDP-1"
 
+# Cursor images come from an Xcursor theme by default. backend = "svg" instead
+# renders static SVG files from the directory named by theme, keeping the
+# vector art crisp at any scale; names without a file fall back to Xcursor.
+#
+# [input.cursor]
+# backend = "svg"
+# theme = "/home/user/.local/share/icons/my-cursors"
+
 # ==============================================================================
 # Global shortcut overrides use exact application and shortcut IDs.
 # An empty value disables a shortcut; new IDs still require physical approval.

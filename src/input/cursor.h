@@ -31,6 +31,7 @@ namespace umbriel {
   class Layout;
   class Output;
   class Server;
+  class SvgCursorTheme;
   class View;
   class Workspace;
   struct Keybind;
@@ -170,6 +171,7 @@ namespace umbriel {
     // clamped the pointer onto the new layout first.
     void handleOutputLayoutChange() const;
     wlr_xcursor_manager* xcursorManager() const { return m_xcursorManager; }
+    SvgCursorTheme* svgTheme() const { return m_svgTheme.get(); }
     bool isPassthrough() const;
     bool canCaptureInput() const;
     void setInputCaptured(bool captured);
@@ -207,6 +209,14 @@ namespace umbriel {
     void setXcursor(const char* name);
     void noteActivity();
     void hideCursor();
+
+  private:
+    // Frame animation for SVG cursors with multiple frames in theme.toml.
+    void startSvgAnimation(const char* name, int frameDelayMs);
+    void stopSvgAnimation();
+    static int onSvgAnimTimer(void* data);
+
+  public:
     bool beginMove(View* view, uint32_t button, bool deferUntilThreshold = false);
     bool beginResize(View* view, uint32_t edges, uint32_t button);
     // A null seat client is an X11 move/resize request, which carries no serial.
@@ -446,7 +456,9 @@ namespace umbriel {
     wlr_cursor* m_cursor = nullptr;
     wlr_xcursor_manager* m_xcursorManager = nullptr;
     wlr_xcursor_manager* m_activeXcursorManager = nullptr;
+    std::unique_ptr<SvgCursorTheme> m_svgTheme;
     std::string m_xcursorTheme;
+    bool m_cursorSvgBackend = false;
     std::string m_activeXcursorName;
     int m_xcursorSize = 0;
     wlr_pointer_constraint_v1* m_activeConstraint = nullptr;
@@ -518,6 +530,9 @@ namespace umbriel {
     uint32_t m_clientCursorImageWidth = 0;
     uint32_t m_clientCursorImageHeight = 0;
     wl_event_source* m_hideTimer = nullptr;
+    wl_event_source* m_svgAnimTimer = nullptr;
+    std::string m_svgAnimName;
+    int m_svgAnimFrame = 0;
     wl_event_source* m_hotCornerTimer = nullptr;
     wl_event_source* m_dropZoneDwellTimer = nullptr;
     wl_event_source* m_dataDragEdgeScrollTimer = nullptr;

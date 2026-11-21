@@ -23,6 +23,7 @@
 using umbriel::ConfigDiagnostic;
 using umbriel::ConfigStore;
 using umbriel::ContentType;
+using umbriel::CursorBackend;
 using umbriel::HdrMode;
 using umbriel::LayoutMode;
 using umbriel::ModifierKey;
@@ -1681,6 +1682,26 @@ UMBRIEL_TEST(windowDragToggleReadsItsVocabularyAndDefaultsOff) {
   CHECK(store.reload().success);
   CHECK(store.config().input.windowDragToggle == WindowDragToggle::None);
   CHECK(containsDiagnostic(store, "ignoring input.window_drag_toggle"));
+}
+
+UMBRIEL_TEST(cursorBackendReadsItsVocabularyAndDefaultsXcursor) {
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write("[input.cursor]\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().input.cursor.backend == CursorBackend::Xcursor);
+
+  file.write("[input.cursor]\nbackend = \"svg\"\ntheme = \"/tmp/cursors\"\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().input.cursor.backend == CursorBackend::Svg);
+  CHECK_EQ(store.config().input.cursor.theme, std::string{"/tmp/cursors"});
+
+  file.write("[input.cursor]\nbackend = \"hyprcursor\"\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().input.cursor.backend == CursorBackend::Xcursor);
+  CHECK(containsDiagnostic(store, "ignoring input.cursor.backend"));
 }
 
 UMBRIEL_TEST(modRightDoubleClickReadsItsVocabularyAndDefaultsOff) {

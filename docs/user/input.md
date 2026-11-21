@@ -275,6 +275,7 @@ SUBSYSTEM=="input", KERNEL=="event*", ATTRS{idVendor}=="1234", ATTRS{idProduct}=
 
 ```toml
 [input.cursor]
+backend = "xcursor"
 theme = ""
 size = 24
 hardware_cursor = true
@@ -284,15 +285,82 @@ hide_timeout_ms = 0
 hide_on_touch = true
 ```
 
-| Key                | Range or values | Description                                        |
-| ------------------ | --------------- | -------------------------------------------------- |
-| `theme`            | string          | Xcursor theme; empty uses the environment default. |
-| `size`             | 1 to 512        | Cursor size in logical pixels.                     |
-| `hardware_cursor`  | bool            | Use a hardware cursor plane when available.        |
-| `follows_focus`    | bool            | Follow keyboard-driven window focus.               |
-| `hide_when_typing` | bool            | Hide after a non-modifier key press.               |
-| `hide_timeout_ms`  | 0 to 3600000    | Hide after inactivity; `0` disables the timeout.   |
-| `hide_on_touch`    | bool            | Hide on touchscreen input.                         |
+| Key                | Range or values      | Description                                                                                                              |
+| ------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `backend`          | `"xcursor"`, `"svg"` | Where themed cursor images come from.                                                                                    |
+| `theme`            | string               | Xcursor theme name, or the SVG theme directory when `backend = "svg"`; empty uses the environment default for `xcursor`. |
+| `size`             | 1 to 512             | Cursor size in logical pixels.                                                                                           |
+| `hardware_cursor`  | bool                 | Use a hardware cursor plane when available.                                                                              |
+| `follows_focus`    | bool                 | Follow keyboard-driven window focus.                                                                                     |
+| `hide_when_typing` | bool                 | Hide after a non-modifier key press.                                                                                     |
+| `hide_timeout_ms`  | 0 to 3600000         | Hide after inactivity; `0` disables the timeout.                                                                         |
+| `hide_on_touch`    | bool                 | Hide on touchscreen input.                                                                                               |
+
+With `backend = "svg"`, `theme` is a path to a cursor theme directory. Two layouts are understood; if a `cursors_scalable/` directory is present it wins, otherwise the directory is scanned for `<name>.svg` files.
+
+### Using an existing theme
+
+Point `theme` at any icon theme that ships the KDE/GNOME `cursors_scalable` layout (KDE Plasma 6.2+, GNOME 51+ — e.g. Breeze, Bibata, Catppuccin SVG builds):
+
+```text
+my-theme/
+  index.theme
+  cursors_scalable/
+    left_ptr/
+      left_ptr.svg
+      metadata.json
+    pointer -> left_ptr        # symlink aliases work too
+```
+
+Each `metadata.json` is an array of frame entries — `filename`, `hotspot_x`/`hotspot_y` in `nominal_size` pixels, and an optional `delay` in milliseconds. Multiple entries animate automatically. `index.theme` `Inherits` chains are not followed, so a theme must contain the cursor directories it needs itself.
+
+### Writing your own theme
+
+A minimal Umbriel-native theme is a flat directory — the file stem is the cursor name (`left_ptr.svg` → `left_ptr`, the same names Xcursor themes use) and `viewBox` sets the artwork. Aspect ratio is preserved, so a wide resize cursor just uses a wide `viewBox`:
+
+```text
+my-cursors/
+  theme.toml          # optional hotspots and animation
+  left_ptr.svg
+  hand.svg
+  xterm.svg
+  ...
+```
+
+Hotspots are normalized fractions of the image (0 to 1) in an optional `theme.toml`:
+
+```toml
+# /path/to/my-cursors/theme.toml
+[theme]
+hotspot_x = 0.0
+hotspot_y = 0.0
+
+[cursor.left_ptr]
+hotspot_x = 0.11
+hotspot_y = 0.09
+```
+
+A per-cursor entry wins over the `[theme]` default. A cursor with no hotspot at all is skipped and falls back — every theme should define a default hotspot and a `default.svg` (or `left_ptr.svg`, which is aliased to `default` automatically).
+
+#### Animated cursors
+
+A `[cursor.<name>]` entry can list a frame sequence instead of relying on `<name>.svg`. Frame paths are relative to the theme directory:
+
+```toml
+[cursor.watch]
+hotspot_x = 0.5
+hotspot_y = 0.5
+frames = ["watch/f00.svg", "watch/f01.svg", "watch/f02.svg"]
+delays = [100, 100, 100]   # ms per frame; optional, default 100
+```
+
+Frames share the cursor's hotspot; at least two are required. `theme.toml` also applies on top of `cursors_scalable` themes for hotspot overrides.
+
+### SVG subset and fallback
+
+Only a subset of SVG is supported: `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, groups with `transform`, `fill`/`stroke`/opacity paint (attributes or `style`), `clipPath` clipping (`clip-path="url(#…)"`, `userSpaceOnUse` only), and the `M L H V C S Q T A Z` path commands. `filter` references are ignored — the cursor renders without the effect. Masks, gradients, text, `<use>`, SMIL/CSS animation, and external references reject the file. Anything missing, unparseable, or unsupported falls back to the Xcursor theme, then to `default`; failures are logged as `cursor-svg` warnings.
+
+Xwayland's default cursor is rendered from the SVG theme as well, and X11 client cursors that pixel-match the fallback Xcursor theme are promoted to the SVG versions; other X11 cursors keep their client-rendered images. Animation is compositor-side only — Xwayland shows the first frame.
 
 Set `hardware_cursor = false` to work around hardware cursor flicker or disappearance. Set `hide_timeout_ms` to a value from 1 to 3600000 to hide an inactive cursor; `0` disables the timeout. With `hide_on_touch = true` (the default), touching the screen hides the cursor until the next pointer or tablet activity.
 

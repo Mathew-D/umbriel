@@ -3,6 +3,7 @@
 #include "config/config.h"
 #include "core/log.h"
 #include "input/cursor.h"
+#include "input/cursor_svg.h"
 #include "input/seat.h"
 #include "server/server.h"
 #include "wlr.h"
@@ -88,7 +89,7 @@ namespace umbriel {
     m_serverStart.notify = onServerStart;
     m_clientDestroy.notify = onClientDestroy;
     wl_signal_add(&m_wlr->server->events.start, &m_serverStart);
-    applyCursor(server.cursor()->xcursorManager());
+    applyCursor(server.cursor()->xcursorManager(), server.cursor()->svgTheme());
     m_ready.notify = onReady;
     wl_signal_add(&m_wlr->events.ready, &m_ready);
     m_newSurface.notify = onNewSurface;
@@ -177,7 +178,15 @@ namespace umbriel {
     return authenticated;
   }
 
-  void Xwayland::applyCursor(wlr_xcursor_manager* manager) {
+  void Xwayland::applyCursor(wlr_xcursor_manager* manager, SvgCursorTheme* svgTheme) {
+    if (m_wlr != nullptr && svgTheme != nullptr) {
+      const auto image = svgTheme->xwaylandImage("default", config().input.cursor.size);
+      if (image.has_value() && image->buffer != nullptr) {
+        wlr_xwayland_set_cursor(m_wlr, image->buffer, image->hotspotX, image->hotspotY);
+        publishXsettings();
+        return;
+      }
+    }
     if (m_wlr == nullptr || manager == nullptr || !wlr_xcursor_manager_load(manager, 1.0F)) {
       return;
     }
@@ -537,7 +546,15 @@ namespace umbriel {
       return;
     }
     const Config::Input::Cursor& cursor = config().input.cursor;
-    XsettingsValues values = xsettingsFor(m_outputs->scale(), cursor.theme, cursor.size);
+    std::string_view cursorTheme = cursor.theme;
+    if (cursor.backend == CursorBackend::Svg) {
+      // X11 clients cannot read SVG files; publish the Xcursor theme the
+      // fallback manager resolved so their cursor pixels still match for
+      // promotion back to the named (SVG) cursors.
+      const wlr_xcursor_manager* manager = m_server.cursor()->xcursorManager();
+      cursorTheme = manager != nullptr && manager->name != nullptr ? manager->name : "";
+    }
+    XsettingsValues values = xsettingsFor(m_outputs->scale(), cursorTheme, cursor.size);
     if (m_xsettingsSerial != 0 && values == m_xsettings) {
       return;
     }

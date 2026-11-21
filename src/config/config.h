@@ -242,6 +242,13 @@ namespace umbriel {
     Always,
   };
 
+  // Where themed cursor images come from. Xcursor uses wlroots' XCursor theme
+  // loader; Svg renders SVG files from a theme directory through Cairo.
+  enum class CursorBackend : uint8_t {
+    Xcursor,
+    Svg,
+  };
+
   // How a touchpad device turns motion into scroll events: two fingers anywhere on the surface, or along
   // its edges. `none` disables scrolling. Device support varies; unset keeps the device's libinput default.
   enum class ScrollMethod : uint8_t {
@@ -1245,6 +1252,7 @@ namespace umbriel {
       struct Cursor {
         std::string theme;
         int size = 24;
+        CursorBackend backend = CursorBackend::Xcursor;
         bool hardwareCursor = true;
         // Warp to the window selected by explicit focus-navigation actions.
         bool followsFocus = false;

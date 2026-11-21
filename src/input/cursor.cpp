@@ -2,6 +2,7 @@
 
 #include "config/config.h"
 #include "core/log.h"
+#include "input/cursor_svg.h"
 #include "input/event_time.h"
 #include "input/gestures.h"
 #include "input/input_capture.h"
@@ -151,8 +152,13 @@ namespace umbriel {
     const Config::Input::Cursor& configured = config().input.cursor;
     m_xcursorTheme = configured.theme;
     m_xcursorSize = configured.size;
-    m_xcursorManager =
-        wlr_xcursor_manager_create(m_xcursorTheme.empty() ? nullptr : m_xcursorTheme.c_str(), m_xcursorSize);
+    m_cursorSvgBackend = configured.backend == CursorBackend::Svg && !configured.theme.empty();
+    m_xcursorManager = wlr_xcursor_manager_create(
+        m_cursorSvgBackend || m_xcursorTheme.empty() ? nullptr : m_xcursorTheme.c_str(), m_xcursorSize
+    );
+    if (m_cursorSvgBackend) {
+      m_svgTheme = std::make_unique<SvgCursorTheme>(configured.theme);
+    }
 
     m_motion.notify = onMotion;
     wl_signal_add(&m_cursor->events.motion, &m_motion);
@@ -210,6 +216,7 @@ namespace umbriel {
     if (m_hideTimer != nullptr) {
       wl_event_source_remove(m_hideTimer);
     }
+    stopSvgAnimation();
     if (m_sceneRefocusIdle != nullptr) {
       wl_event_source_remove(m_sceneRefocusIdle);
     }
@@ -257,20 +264,26 @@ namespace umbriel {
     updateHideTimer();
     cancelHotCorner();
     updateHotCorner();
-    if (configured.theme == m_xcursorTheme && configured.size == m_xcursorSize) {
+    const bool svgBackend = configured.backend == CursorBackend::Svg && !configured.theme.empty();
+    if (configured.theme == m_xcursorTheme && configured.size == m_xcursorSize && svgBackend == m_cursorSvgBackend) {
       return;
     }
 
-    wlr_xcursor_manager* manager =
-        wlr_xcursor_manager_create(configured.theme.empty() ? nullptr : configured.theme.c_str(), configured.size);
+    wlr_xcursor_manager* manager = wlr_xcursor_manager_create(
+        svgBackend || configured.theme.empty() ? nullptr : configured.theme.c_str(), configured.size
+    );
     if (manager == nullptr) {
       return;
     }
+    auto svgTheme = svgBackend ? std::make_unique<SvgCursorTheme>(configured.theme) : nullptr;
 
     wlr_xcursor_manager* oldManager = m_xcursorManager;
+    auto oldSvgTheme = std::move(m_svgTheme);
     m_xcursorManager = manager;
+    m_svgTheme = std::move(svgTheme);
     m_xcursorTheme = configured.theme;
     m_xcursorSize = configured.size;
+    m_cursorSvgBackend = svgBackend;
 
     const bool hasXwaylandClientCursor = m_clientCursorFromXwayland && m_clientCursorSurface != nullptr;
     if (hasXwaylandClientCursor) {
@@ -295,7 +308,7 @@ namespace umbriel {
     }
     // Xwayland's default cursor is a buffer of the manager's image, so it moves over before the old manager dies.
     if (Xwayland* xwayland = m_server->xwayland()) {
-      xwayland->applyCursor(manager);
+      xwayland->applyCursor(manager, m_svgTheme.get());
     }
     wlr_xcursor_manager_destroy(oldManager);
   }
@@ -359,6 +372,7 @@ namespace umbriel {
       return;
     }
     m_cursorHidden = true;
+    stopSvgAnimation();
     forwardEffectPointer();
     wlr_cursor_set_surface(m_cursor, nullptr, 0, 0);
   }
@@ -991,10 +1005,67 @@ namespace umbriel {
 
   void Cursor::setXcursor(const char* name) {
     if (!m_cursorHidden) {
-      wlr_cursor_set_xcursor(m_cursor, m_xcursorManager, name);
+      const SvgCursorTheme::Image* image = m_svgTheme != nullptr ? m_svgTheme->image(name, m_xcursorSize) : nullptr;
+      if (image != nullptr) {
+        wlr_cursor_set_buffer(m_cursor, image->buffer, image->hotspotX, image->hotspotY, image->scale);
+        if (image->frameCount > 1) {
+          startSvgAnimation(name, image->frameDelayMs);
+        } else {
+          stopSvgAnimation();
+        }
+      } else {
+        stopSvgAnimation();
+        wlr_cursor_set_xcursor(m_cursor, m_xcursorManager, name);
+      }
     }
     m_activeXcursorManager = m_xcursorManager;
     m_activeXcursorName = name;
+  }
+
+  void Cursor::startSvgAnimation(const char* name, int frameDelayMs) {
+    if (m_svgAnimTimer == nullptr) {
+      m_svgAnimTimer = wl_event_loop_add_timer(wl_display_get_event_loop(m_server->display()), onSvgAnimTimer, this);
+    }
+    m_svgAnimName = name;
+    m_svgAnimFrame = 0;
+    wl_event_source_timer_update(m_svgAnimTimer, frameDelayMs > 0 ? frameDelayMs : 100);
+  }
+
+  void Cursor::stopSvgAnimation() {
+    m_svgAnimName.clear();
+    if (m_svgAnimTimer != nullptr) {
+      wl_event_source_timer_update(m_svgAnimTimer, 0);
+    }
+  }
+
+  int Cursor::onSvgAnimTimer(void* data) {
+    Cursor* self = static_cast<Cursor*>(data);
+    // The animation only makes sense while this exact SVG cursor is the
+    // visible one: hidden cursors, client-drawn surfaces, and fallback
+    // Xcursors all leave the timer disarmed.
+    if (self->m_cursorHidden
+        || self->m_clientCursorSurface != nullptr
+        || self->m_svgTheme == nullptr
+        || self->m_svgAnimName != self->m_activeXcursorName) {
+      self->stopSvgAnimation();
+      return 0;
+    }
+    const SvgCursorTheme::Image* image =
+        self->m_svgTheme->imageFrame(self->m_svgAnimName, self->m_xcursorSize, self->m_svgAnimFrame);
+    if (image == nullptr || image->frameCount <= 1) {
+      self->stopSvgAnimation();
+      return 0;
+    }
+    self->m_svgAnimFrame = (self->m_svgAnimFrame + 1) % image->frameCount;
+    const SvgCursorTheme::Image* next =
+        self->m_svgTheme->imageFrame(self->m_svgAnimName, self->m_xcursorSize, self->m_svgAnimFrame);
+    if (next == nullptr) {
+      self->stopSvgAnimation();
+      return 0;
+    }
+    wlr_cursor_set_buffer(self->m_cursor, next->buffer, next->hotspotX, next->hotspotY, next->scale);
+    wl_event_source_timer_update(self->m_svgAnimTimer, next->frameDelayMs > 0 ? next->frameDelayMs : 100);
+    return 0;
   }
 
 #ifdef UMBRIEL_HARNESS
