@@ -231,6 +231,7 @@ namespace umbriel {
     int decorationCornerRadius() const { return m_decoration.cornerRadius(); }
     // Padding of this window's border preset, 0 without one.
     int borderEffectPadding() const { return m_effects.borderPadding(); }
+    bool borderUnfocused();
     // Opacity multiplier the overview applies to windows it leaves on screen (pinned ones) while it opens and closes.
     void setOverviewOpacity(float opacity);
     wlr_scene_tree* homeTree() const;
@@ -845,7 +846,7 @@ namespace umbriel {
     void leaveForeignOutput();
     bool assignLaunchOrigin(
         std::string_view token, std::shared_ptr<WorkspaceLaunchAnchor> workspace, uint32_t timeoutMsec,
-        std::string_view scratchpad
+        std::string_view scratchpad, bool floating
     );
     bool consumeLaunchActivation(std::string_view token);
     bool cancelLaunchOrigin(std::string_view token);
@@ -1030,6 +1031,7 @@ namespace umbriel {
     bool m_launchPlacementPending = false;
     std::shared_ptr<WorkspaceLaunchAnchor> m_launchWorkspace;
     std::string m_launchScratchpad;
+    bool m_launchFloating = false;
     std::optional<std::string> m_launchToken;
     std::string m_launchWorkspaceId;
     wl_event_source* m_launchPlacementTimer = nullptr;
